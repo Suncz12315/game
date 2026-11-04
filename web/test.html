@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>松鼠大作战 · 引擎测试</title>
+<style>
+  body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: #0f172a; color: #e2e8f0; padding: 24px; }
+  h1 { font-size: 20px; }
+  #summary { font-size: 18px; padding: 12px 16px; border-radius: 8px; margin: 16px 0; font-weight: 700; }
+  #summary.pass { background: #14532d; color: #bbf7d0; }
+  #summary.fail { background: #7f1d1d; color: #fecaca; }
+  .test { padding: 4px 0; border-bottom: 1px solid #1e293b; font-size: 13px; }
+  .ok { color: #86efac; }
+  .bad { color: #fca5a5; white-space: pre-wrap; }
+  #failures .test { color: #fca5a5; }
+</style>
+</head>
+<body data-status="running">
+<h1>🐿️ 松鼠大作战 · 引擎测试</h1>
+<div id="summary">运行中…</div>
+<div id="tests"></div>
+<div id="failures"></div>
+<script src="engine.js"></script>
+<script>
+(function () {
+  'use strict';
+  const E = window.SquirrelEngine;
+  const tests = [];
+  const test = (name, fn) => tests.push({ name, fn });
+
+  function assert(cond, msg) {
+    if (!cond) throw new Error(msg || '断言失败');
+  }
+  function eq(a, b, msg) {
+    if (a !== b) throw new Error((msg || '值不相等') + `（期望 ${b}，实际 ${a}）`);
+  }
+  function close(a, b, eps, msg) {
+    if (Math.abs(a - b) > (eps == null ? 1e-6 : eps)) {
+      throw new Error((msg || '数值不接近') + `（期望 ${b}，实际 ${a}）`);
+    }
+  }
+  function makeSession(rows, opts) {
+    opts = opts || {};
+    const tm = new E.TileMap(rows);
+    const s = new E.GameSession();
+    s.tilemap = tm;
+    s.player = opts.player || new E.Player(tm.playerSpawn.x, tm.playerSpawn.y);
+    s.enemies = opts.enemies || tm.enemySpawns.map((p) => new E.Enemy(p.x, p.y));
+    s.acorns = opts.acorns || tm.acorns.slice();
+    s.goldenAcorns = opts.goldenAcorns || tm.goldenAcorns.slice();
+    s.springs = tm.springs;
+    s.hazards = tm.hazards;
+    s.checkpoints = tm.checkpoints.map((c) => ({ x: c.x, y: c.y, active: false }));
+    s.respawnPoint = { x: tm.playerSpawn.x, y: tm.playerSpawn.y };
+    s.combo = 0;
+    s.comboT = 0;
+    s.state = E.GameState.PLAYING;
+    s.cleared = false;
+    return s;
+  }
+
+  // ─── TileMap ───
+  test('地图尺寸与补齐', () => {
+    const m = new E.TileMap(['        ', '   P    ', '  ===   ', '########']);
+    eq(m.h, 4, '行数');
+    eq(m.w, 8, '列数');
+    eq(m.rows.every((r) => r.length === 8), true, '各行长度一致');
+  });
+
+  test('实心格判定', () => {
+    const m = new E.TileMap(['        ', '   P    ', '  ===   ', '########']);
+    assert(m.isSolid(0, 3), '# 是实心');
+    assert(m.isSolid(2, 2), '= 是实心');
+    assert(!m.isSolid(3, 1), '空格不是实心');
+    assert(m.isSolid(-1, 0), '地图外视为实心');
+  });
+
+  test('玩家出生点解析', () => {
+    const m = new E.TileMap(['        ', '   P    ', '  ===   ', '########']);
+    eq(m.playerSpawn.x, 3 * E.TILE);
+    eq(m.playerSpawn.y, 1 * E.TILE);
+  });
+
+  test('橡果与敌人出生点解析', () => {
+    const m = new E.TileMap([' A  E ', ' #####']);
+    eq(m.acorns.length, 1);
+    eq(m.enemySpawns.length, 1);
+    eq(m.acorns[0].x, E.TILE);
+  });
+
+  test('新元素解析：金橡果 / 尖刺 / 检查点 / 恶魔', () => {
+    const m = new E.TileMap([' * ^ C D ', '########']);
+    eq(m.goldenAcorns.length, 1);
+    eq(m.goldenAcorns[0].value, 150);
+    eq(m.hazards.length, 1);
+    eq(m.checkpoints.length, 1);
+    eq(m.enemySpawns.length, 1);
+    eq(m.enemySpawns[0].type, 'demon');
+    assert(m.goldenAcorns[0].golden, '应标记为金橡果');
+  });
+
+  test('新玩法解析：易碎平台 / 藤蔓门 / 钥匙 / 气流 / 锯轮', () => {
+    const m = new E.TileMap([
+      ' ~ L K W V v ',
+      '#############',
+    ]);
+    eq(m.crumbles.length, 1);
+    eq(m.gates.length, 1);
+    eq(m.keys.length, 1);
+    eq(m.winds.length, 1);
+    eq(m.saws.length, 2);
+    eq(m.saws[0].axis, 'x');
+    eq(m.saws[1].axis, 'y');
+    eq(m.crumbStateAt(1, 0), 'idle');
+    assert(m.isSolid(3, 0), '藤蔓门关闭时应为实心');
+    m.gateOpen = true;
+    assert(!m.isSolid(3, 0), '藤蔓门打开后应可通行');
+  });
+
+  test('易碎平台：站立后晃动、消失并恢复', () => {
+    const m = new E.TileMap([
+      '     ',
+      ' ~~  ',
+      '#####',
+    ]);
+    const p = new E.Player(45, 2);
+    p.onGround = true;
+    eq(m.crumbStateAt(1, 1), 'idle');
+    m.updateCrumbles(p);
+    eq(m.crumbStateAt(1, 1), 'shaking');
+    for (let i = 0; i < 34; i++) m.updateCrumbles(p);
+    eq(m.crumbStateAt(1, 1), 'gone');
+    assert(!m.isSolid(1, 1), '消失期间不再实心');
+    for (let i = 0; i < 130; i++) m.updateCrumbles(p);
+    eq(m.crumbStateAt(1, 1), 'idle');
+    assert(m.isSolid(1, 1), '恢复后重新实心');
+  });
+
+  test('上升气流持续托起玩家', () => {
+    const m = new E.TileMap([
+      ' W ',
+      ' W ',
+      ' W ',
+      '###',
+    ]);
+    const p = new E.Player(E.TILE + 3, 75);
+    p.update({}, m);
+    eq(p.vy, -4.6);
+    assert(p.y < 75, '应被气流向上推');
+  });
+
+  test('集齐钥匙后藤蔓门打开', () => {
+    const s = makeSession([
+      ' K L P',
+      '######',
+    ]);
+    s.keys = s.tilemap.keys.map((k) => ({ x: k.x, y: k.y, collected: false }));
+    eq(s.keys.length, 1);
+    assert(s.tilemap.isSolid(3, 0), '开门前门是实心的');
+    s.player.x = s.keys[0].x + 5;
+    s.player.y = s.keys[0].y + 5;
+    s.update({});
+    assert(s.keys[0].collected, '碰到钥匙应收集');
+    assert(s.tilemap.gateOpen, '集齐钥匙后大门打开');
+    assert(!s.tilemap.isSolid(3, 0), '开门后可以通行');
+  });
+
+  test('锯轮巡逻并可伤害玩家', () => {
+    const s = makeSession([
+      ' A P   ',
+      ' V     ',
+      '#######',
+    ]);
+    s.saws = s.tilemap.saws;
+    eq(s.saws.length, 1);
+    const x0 = s.saws[0].curX;
+    s.update({});
+    assert(Math.abs(s.saws[0].curX - x0) > 0.01, '锯轮应移动');
+    s.player.invincible = 0;
+    s.player.lives = 3;
+    s.player.x = s.saws[0].curX + 4;
+    s.player.y = s.saws[0].curY + 4;
+    const before = s.player.lives;
+    s.update({});
+    eq(s.player.lives, before - 1, '碰到锯轮应扣命');
+  });
+
+  // ─── 物理 ───
+  test('重力与最大下落速度', () => {
+    const p = new E.Player(20, 20);
+    p.applyGravity();
+    assert(p.vy > 0);
+    p.vy = 100;
+    p.applyGravity();
+    eq(p.vy, E.MAX_FALL);
+  });
+
+  test('跳跃：落地时按跳跃键起跳', () => {
+    const tm = new E.TileMap(['    ', '####']);
+    const p = new E.Player(20, 0);
+    for (let i = 0; i < 30; i++) p.update({}, tm);
+    assert(p.onGround, '应落地');
+    p.update({ jump: true }, tm);
+    assert(p.didJump, '应触发起跳');
+    assert(p.vy < 0, '垂直速度为负');
+  });
+
+  test('空中不能二段跳', () => {
+    const tm = new E.TileMap(['      ', '      ', '######']);
+    const p = new E.Player(20, 0);
+    p.update({ jump: true }, tm); // 空中，不应起跳
+    assert(!p.didJump, '空中不应起跳');
+  });
+
+  test('水平碰撞阻挡', () => {
+    const tm = new E.TileMap(['####', '####']);
+    const p = new E.Player(10, 10);
+    p.vx = 5;
+    p.moveAndCollide(tm);
+    assert(p.x < 20, '应被砖块挡住');
+  });
+
+  test('落在地面上', () => {
+    const tm = new E.TileMap(['    ', '====']);
+    const p = new E.Player(20, 8);
+    p.applyGravity();
+    p.moveAndCollide(tm);
+    assert(p.onGround, '应站在地面');
+  });
+
+  test('生命与死亡', () => {
+    const p = new E.Player(20, 20);
+    p.lives = 3;
+    p.die();
+    eq(p.lives, 2);
+    p.invincible = 0;
+    p.lives = 0;
+    p.die();
+    assert(p.dead, '生命为负时死亡');
+  });
+
+  test('无敌帧期间不重复扣命', () => {
+    const p = new E.Player(20, 20);
+    p.die();
+    const lives = p.lives;
+    const lost = p.die();
+    eq(lost, false);
+    eq(p.lives, lives);
+  });
+
+  // ─── 敌人 / 弹簧 ───
+  test('敌人巡逻移动', () => {
+    const tm = new E.TileMap(['          ', '##########']);
+    const e = new E.Enemy(40, 8);
+    const x0 = e.x;
+    e.update(tm);
+    assert(e.x !== x0, '敌人应移动');
+  });
+
+  test('被投掷的敌人受重力', () => {
+    const tm = new E.TileMap(['   ', '###']);
+    const e = new E.Enemy(20, 8);
+    e.thrown = true;
+    e.vy = -10;
+    e.update(tm);
+    assert(e.vy > -10, '重力应使 vy 增大');
+  });
+
+  test('弹簧激活与回弹', () => {
+    const s = new E.Spring(40, 40);
+    eq(s.anim, 0);
+    s.activate();
+    eq(s.anim, 8);
+    s.update();
+    eq(s.anim, 7);
+  });
+
+  test('踩到弹簧会被弹起', () => {
+    // S 位于第 1 行，下方第 2 行是平台
+    const session = makeSession([
+      '     ',
+      '  S  ',
+      '#####',
+    ]);
+    const sp = session.springs[0];
+    session.player.x = sp.x + 3;
+    session.player.y = sp.rect.top - session.player.h + 2;
+    session.player.vy = 2;
+    session.update({});
+    assert(session.player.vy < -10, '应被弹起，实际 vy=' + session.player.vy);
+    assert(sp.anim > 0, '弹簧动画应激活');
+  });
+
+  // ─── 关卡 ───
+  test('80 关均可加载，难度逐关递增且布局不重复', () => {
+    eq(E.LEVEL_NAMES.length, 80, '关卡总数');
+    let prevAcorns = 0;
+    let prevEnemies = 0;
+    const names = new Set();
+    const layouts = new Set();
+    for (let i = 1; i <= 80; i++) {
+      const m = E.loadLevel(i);
+      assert(m.acorns.length >= 5, `第 ${i} 关橡果数量不足`);
+      assert(m.enemySpawns.length >= 1, `第 ${i} 关敌人数量不足`);
+      assert(m.acorns.length >= prevAcorns, `第 ${i} 关橡果应不少于上一关`);
+      assert(m.enemySpawns.length >= prevEnemies, `第 ${i} 关敌人应不少于上一关`);
+      assert(m.playerSpawn, '缺少出生点');
+      const name = E.LEVEL_NAMES[i - 1];
+      assert(name && !names.has(name), `第 ${i} 关名称重复或为空：${name}`);
+      names.add(name);
+      layouts.add(m.rows.join('\n'));
+      prevAcorns = m.acorns.length;
+      prevEnemies = m.enemySpawns.length;
+    }
+    eq(names.size, 80, '80 关名称应全部不同');
+    eq(layouts.size, 80, '80 关布局应全部不同');
+  });
+
+  test('80 关布局两两不雷同', () => {
+    // 与引擎内一致的行模式指纹：去行尾空格、忽略整行同色的地面/砖行
+    const fp = (rows) => {
+      const counts = new Map();
+      for (const raw of rows) {
+        const r = raw.replace(/\s+$/g, '');
+        if (!r || /^(.)\1*$/.test(r)) continue;
+        counts.set(r, (counts.get(r) || 0) + 1);
+      }
+      return counts;
+    };
+    const jac = (a, b) => {
+      let inter = 0;
+      let union = 0;
+      for (const k of new Set([...a.keys(), ...b.keys()])) {
+        const x = a.get(k) || 0;
+        const y = b.get(k) || 0;
+        inter += Math.min(x, y);
+        union += Math.max(x, y);
+      }
+      return union === 0 ? 0 : inter / union;
+    };
+    const fps = [];
+    for (let i = 1; i <= 80; i++) fps.push(fp(E.loadLevel(i).rows));
+    for (let i = 0; i < 80; i++) {
+      for (let j = i + 1; j < 80; j++) {
+        const sim = jac(fps[i], fps[j]);
+        assert(sim < 0.5, `第 ${i + 1} 关与第 ${j + 1} 关布局过于相似（${sim.toFixed(2)}）`);
+      }
+    }
+  });
+
+  test('80 关所有橡果、钥匙与检查点均可达', () => {
+    // 以可站立格为节点做 BFS，边规则与生成器的跳跃约束一致：
+    // 平地/下落 ≤5 格，升 1 ≤5、升 2 ≤4、升 3 ≤2；弹簧可升 8 格；气流柱内自由爬升。
+    const hopOK = (rise, gap) =>
+      rise <= 1 ? gap <= 5 : rise === 2 ? gap <= 4 : rise === 3 ? gap <= 2 : false;
+    const reach = (m, gateOpen) => {
+      m.gateOpen = gateOpen;
+      const isW = (x, y) => m.tileType(x, y) === 'W';
+      const stand = (x, y) => {
+        if (x < 0 || x >= m.w || y < 0 || y >= m.h) return false;
+        const c = m.tileType(x, y);
+        if (c === '^' || m.isSolid(x, y)) return false;
+        if (c === 'S') return true;
+        return m.isSolid(x, y + 1);
+      };
+      const isNode = (x, y) => stand(x, y) || isW(x, y);
+      const sx = Math.floor(m.playerSpawn.x / E.TILE);
+      const sy = Math.floor(m.playerSpawn.y / E.TILE);
+      const seen = new Set([sx + ',' + sy]);
+      const q = [[sx, sy]];
+      while (q.length) {
+        const [x, y] = q.pop();
+        const onSpring = m.tileType(x, y) === 'S';
+        for (let dx = -5; dx <= 5; dx++) {
+          for (let dy = -12; dy <= 10; dy++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (!isNode(nx, ny)) continue;
+            const rise = y - ny;
+            const gap = Math.abs(dx);
+            let ok;
+            if (isW(x, y)) ok = (nx === x) || (rise <= 1 && gap <= 2);
+            else if (onSpring) ok = rise <= 8 && gap <= 3;
+            else ok = hopOK(Math.max(0, rise), gap);
+            if (!ok) continue;
+            const k = nx + ',' + ny;
+            if (!seen.has(k)) { seen.add(k); q.push([nx, ny]); }
+          }
+        }
+      }
+      return (px, py) => {
+        const x = Math.floor(px / E.TILE);
+        const y = Math.floor(py / E.TILE);
+        return seen.has(x + ',' + y) || seen.has(x + ',' + (y + 1)) || seen.has(x + ',' + (y - 1));
+      };
+    };
+    for (let i = 1; i <= 80; i++) {
+      // 门关着时钥匙必须可达；门开了（集齐钥匙）其余收集品必须可达
+      const hitKeys = reach(E.loadLevel(i), false);
+      for (const k of E.loadLevel(i).keys) {
+        assert(hitKeys(k.x, k.y), `第 ${i} 关钥匙不可达`);
+      }
+      const m = E.loadLevel(i);
+      const hit = reach(m, true);
+      for (const a of m.acorns) assert(hit(a.x, a.y), `第 ${i} 关橡果 (${a.x / E.TILE | 0},${a.y / E.TILE | 0}) 不可达`);
+      for (const a of m.goldenAcorns) assert(hit(a.x, a.y), `第 ${i} 关金橡果不可达`);
+      for (const c of m.checkpoints) assert(hit(c.x, c.y), `第 ${i} 关检查点不可达`);
+    }
+  });
+
+  test('80 关覆盖全部机制，后期机制更丰富', () => {
+    const all = new Set();
+    let early = 0;
+    let late = 0;
+    for (let i = 1; i <= 80; i++) {
+      const m = E.loadLevel(i);
+      const set = [];
+      if (m.crumbles.length) set.push('~');
+      if (m.keys.length) set.push('K');
+      if (m.winds.length) set.push('W');
+      if (m.saws.length) set.push('V');
+      if (m.springs.length) set.push('S');
+      if (m.hazards.length >= 4) set.push('^');
+      // 前 3 关是纯跳跃的入门段（第 1 关带引导），之后每关都要有标志性机制。
+      if (i > 3) assert(set.length > 0, `第 ${i} 关缺少标志性玩法`);
+      for (const ch of set) all.add(ch);
+      if (i <= 10) early += set.length;
+      if (i >= 71) late += set.length;
+    }
+    for (const ch of ['~', 'K', 'W', 'V', 'S', '^']) {
+      assert(all.has(ch), `机制 ${ch} 未在任何关卡出现`);
+    }
+    assert(late > early, `最后 10 关的机制应比前 10 关更丰富（${late} vs ${early}）`);
+  });
+
+  test('第 1 关是温和的引导关', () => {
+    const m = E.loadLevel(1);
+    assert(m.acorns.length >= 5 && m.acorns.length <= 10, '第 1 关橡果数量应适中');
+    assert(m.enemySpawns.length >= 1 && m.enemySpawns.length <= 3, '第 1 关敌人不宜过多');
+    eq(m.keys.length, 0, '引导关不应有钥匙门');
+    eq(m.winds.length, 0, '引导关不应有气流');
+    eq(m.saws.length, 0, '引导关不应有锯轮');
+    eq(m.hazards.length, 0, '引导关不应有尖刺');
+  });
+
+  test('关卡宽度补齐后无越界', () => {
+    for (let i = 1; i <= 80; i++) {
+      const m = E.loadLevel(i);
+      for (let y = 0; y < m.h; y++) eq(m.rows[y].length, m.w);
+      m.isSolid(m.w + 5, m.h + 5);
+    }
+  });
+
+  // ─── 游戏会话 ───
+  test('开始游戏：状态/分数/生命', () => {
+    const s = new E.GameSession();
+    eq(s.state, E.GameState.MENU);
+    s.start();
+    eq(s.state, E.GameState.PLAYING);
+    eq(s.level, 1);
+    eq(s.score, 0);
+    eq(s.player.lives, 3);
+  });
+
+  test('收集橡果加分', () => {
+    const s = new E.GameSession();
+    s.start();
+    const a = s.acorns[0];
+    s.player.x = a.x + 2;
+    s.player.y = a.y + 2;
+    s.player.vy = 0;
+    s.update({});
+    assert(a.collected, '橡果应被收集');
+    eq(s.score, 50);
+    assert(s.events.some((e) => e.type === 'sound' && e.name === 'acorn'));
+  });
+
+  test('金橡果加 150 分且不影响过关条件', () => {
+    const s = makeSession(['*       ', '########'], {
+      player: new E.Player(2, 2),
+      enemies: [],
+      acorns: [new E.Acorn(600, 0)],
+    });
+    s.update({});
+    eq(s.goldenCollected(), 1);
+    eq(s.score, 150);
+    eq(s.state, E.GameState.PLAYING, '普通橡果未收集，不应过关');
+  });
+
+  test('尖刺扣命并从检查点复活', () => {
+    const s = makeSession([' C     ^ ', '##########'], {
+      player: new E.Player(42, 2),
+      enemies: [],
+      acorns: [new E.Acorn(900, 0)],
+    });
+    s.update({});
+    const cp = s.checkpoints[0];
+    assert(cp.active, '触碰后检查点应激活');
+    eq(s.respawnPoint.x, cp.x);
+
+    // 传送到尖刺上，确认掉命并回到检查点
+    s.player.x = 7 * E.TILE + 4;
+    s.player.y = 2;
+    s.player.vy = 0;
+    s.player.invincible = 0;
+    s.update({});
+    eq(s.player.lives, 2);
+    eq(s.player.x, cp.x);
+    eq(s.player.y, cp.y);
+  });
+
+  test('连击倍率与超时清零', () => {
+    const s = new E.GameSession();
+    s.start();
+    s._registerKill(100, 0, 0, '#fff');
+    eq(s.combo, 1);
+    eq(s.score, 100);
+    s._registerKill(100, 0, 0, '#fff');
+    eq(s.combo, 2);
+    eq(s.score, 300);
+    s.comboT = 1;
+    s.update({});
+    eq(s.combo, 0, '连击超时应清零');
+  });
+
+  test('集齐橡果过关并结算生命奖励', () => {
+    const s = new E.GameSession();
+    s.start();
+    s.player.lives = 2;
+    for (const a of s.acorns) a.collected = true;
+    const last = s.acorns[0];
+    const before = s.acorns.filter((a) => a.collected).length;
+    // 取消最后一个的收集状态，让本帧真正触发通关
+    last.collected = false;
+    s.player.x = last.x;
+    s.player.y = last.y;
+    s.update({});
+    assert(last.collected);
+    eq(s.state, E.GameState.LEVEL_CLEAR);
+    eq(s.score, 50 + 2 * 500);
+  });
+
+  test('最后一关通关进入胜利状态', () => {
+    const s = new E.GameSession();
+    s.start();
+    s.level = s.maxLevel;
+    s._buildLevel();
+    s.state = E.GameState.PLAYING;
+    for (const a of s.acorns) a.collected = true;
+    s.update({});
+    eq(s.state, E.GameState.VICTORY);
+  });
+
+  test('过关后进入下一关，保留分数', () => {
+    const s = new E.GameSession();
+    s.start();
+    s.score = 1234;
+    s.player.lives = 3;
+    for (const a of s.acorns) a.collected = true;
+    s.update({});
+    eq(s.state, E.GameState.LEVEL_CLEAR);
+    const score = s.score;
+    s.nextLevel();
+    eq(s.level, 2);
+    eq(s.state, E.GameState.PLAYING);
+    eq(s.score, score);
+    eq(s.player.lives, 3, '新关卡生命重置');
+    assert(s.acorns.every((a) => !a.collected), '新关卡橡果重置');
+  });
+
+  test('主按钮：失败后重新开始', () => {
+    const s = new E.GameSession();
+    s.start();
+    s.player.lives = 0;
+    s.player.invincible = 0;
+    s.player.die();
+    eq(s.state, E.GameState.PLAYING); // 尚未 update，状态未同步
+    s.update({});
+    eq(s.state, E.GameState.GAME_OVER);
+    s.primaryAction();
+    eq(s.state, E.GameState.PLAYING);
+    eq(s.level, 1);
+    eq(s.score, 0);
+    eq(s.player.lives, 3);
+  });
+
+  test('掉出地图扣命并回到出生点', () => {
+    const s = new E.GameSession();
+    s.start();
+    s.player.y = s.tilemap.pixelH + 500;
+    s.player.x = 100;
+    s.update({});
+    eq(s.player.lives, 2);
+    assert(Math.abs(s.player.y - s.tilemap.playerSpawn.y) < 100, '应回到出生点附近');
+  });
+
+  test('踩敌人：消灭并得分', () => {
+    const s = makeSession([
+      '        ',
+      '        ',
+      '   E    ',
+      '########',
+    ], { acorns: [new E.Acorn(700, 0)] });
+    // 玩家从上方落下，本帧与敌人只有浅重叠（<20px）才算踩踏
+    s.player.x = 40;
+    s.player.y = 46;
+    s.player.vy = 8;
+    s.enemies[0].x = 42;
+    s.enemies[0].y = 86;
+    s.enemies[0].vx = 0;
+    s.update({});
+    eq(s.enemies.length, 0, '敌人应被消灭');
+    eq(s.score, 100);
+    assert(s.player.vy < 0, '踩踏后应弹起');
+  });
+
+  test('侧面碰到敌人扣命', () => {
+    const s = makeSession([
+      '        ',
+      '        ',
+      '   E    ',
+      '########',
+    ], { acorns: [new E.Acorn(0, 0)] });
+    s.acorns[0].collected = true;
+    s.player.x = 40;
+    s.player.y = 118;
+    s.player.vy = 0;
+    s.enemies[0].x = 42;
+    s.enemies[0].y = 118;
+    s.enemies[0].vx = 0;
+    s.update({});
+    eq(s.player.lives, 2);
+  });
+
+  test('举起 / 投掷敌人', () => {
+    const s = makeSession([
+      '        ',
+      '        ',
+      '   E    ',
+      '########',
+    ], { acorns: [new E.Acorn(700, 0)] });
+    s.player.x = 40;
+    s.player.y = 116;
+    s.enemies[0].x = 60;
+    s.enemies[0].y = 118;
+    const ok = s.action();
+    assert(ok, '应成功举起');
+    assert(s.player.holdingItem, '手中应有敌人');
+    eq(s.enemies.length, 0, '被举起的敌人离开场景');
+    // 举起的敌人跟随头顶
+    s.update({});
+    assert(Math.abs(s.player.holdingItem.x - (s.player.x + 1)) < 1.5, '被举敌人跟随玩家');
+    assert(s.player.holdingItem.y < s.player.y, '在头顶');
+    // 投掷
+    const ok2 = s.action();
+    assert(ok2, '应成功投掷');
+    eq(s.enemies.length, 1, '敌人被抛出');
+    assert(s.player.holdingItem === null);
+    assert(s.enemies[0].thrown, '处于投掷状态');
+    assert(s.enemies[0].vx > 0, '朝右飞行');
+  });
+
+  test('投掷敌人连锁消灭其他敌人 +200', () => {
+    const s = makeSession([
+      '          ',
+      '          ',
+      '          ',
+      '##########',
+    ], { acorns: [new E.Acorn(700, 0)] });
+    s.player.x = 10;
+    s.player.y = 20;
+    // 两个敌人在空中重叠，避免“落地即结束投掷”干扰本用例
+    const a = new E.Enemy(200, 40);
+    const b = new E.Enemy(210, 40);
+    a.thrown = true;
+    a.vx = 0;
+    a.vy = 0;
+    b.vx = 0;
+    b.vy = 0;
+    s.enemies = [a, b];
+    s.update({});
+    eq(s.enemies.length, 1, '一个敌人被消灭');
+    eq(s.score, 200);
+  });
+
+  test('暂停 / 继续', () => {
+    const s = new E.GameSession();
+    s.start();
+    s.pause();
+    eq(s.state, E.GameState.PAUSED);
+    const x = s.player.x;
+    s.update({ right: true });
+    eq(s.player.x, x, '暂停时不应更新');
+    s.resume();
+    eq(s.state, E.GameState.PLAYING);
+  });
+
+  test('返回主菜单', () => {
+    const s = new E.GameSession();
+    s.start();
+    s.score = 999;
+    s.toMenu();
+    eq(s.state, E.GameState.MENU);
+    eq(s.score, 0);
+  });
+
+  // ─── 模糊测试：随机输入不应崩溃 ───
+  test('随机操作压力测试（80 关各 400 帧）', () => {
+    let seed = 20261103;
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    for (let level = 1; level <= 80; level++) {
+      const s = new E.GameSession();
+      s.start();
+      s.level = level;
+      s._buildLevel();
+      s.state = E.GameState.PLAYING;
+      s.score = 0;
+      for (let i = 0; i < 400; i++) {
+        if (s.state !== E.GameState.PLAYING) break;
+        const input = {
+          left: rand() < 0.25,
+          right: rand() < 0.45,
+          jump: rand() < 0.35,
+        };
+        if (rand() < 0.03) s.action();
+        s.update(input);
+        assert(Number.isFinite(s.player.x) && Number.isFinite(s.player.y), '玩家坐标应有限');
+        assert(s.player.lives >= -1, '生命值异常');
+        assert(['playing', 'level_clear', 'game_over', 'victory'].includes(s.state), '状态异常: ' + s.state);
+      }
+    }
+  });
+
+  // ─── 运行 ───
+  const results = [];
+  let passed = 0;
+  for (const t of tests) {
+    try {
+      t.fn();
+      passed++;
+      results.push(`<div class="test ok">✓ ${t.name}</div>`);
+    } catch (err) {
+      results.push(`<div class="test bad">✗ ${t.name}<br>${String(err && err.stack || err)}</div>`);
+    }
+  }
+  const failed = tests.length - passed;
+  document.body.dataset.status = failed ? 'fail' : 'pass';
+  document.body.dataset.passed = String(passed);
+  document.body.dataset.failed = String(failed);
+  const summary = document.getElementById('summary');
+  summary.className = failed ? 'fail' : 'pass';
+  summary.textContent = failed
+    ? `✗ ${failed} 个失败 / ${tests.length} 个测试`
+    : `✓ 全部通过（${passed} / ${tests.length}）`;
+  document.getElementById('tests').innerHTML = results.join('');
+  document.getElementById('failures').textContent = failed ? '请查看上方红色用例。' : '';
+  document.title = failed ? `FAIL ${failed}/${tests.length}` : `PASS ${passed}/${tests.length}`;
+})();
+</script>
+</body>
+</html>

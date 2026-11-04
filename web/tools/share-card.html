@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>share card</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; width: 1200px; height: 630px; overflow: hidden;
+    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    background: #79b3ea;
+  }
+  .card {
+    position: relative; width: 1200px; height: 630px; overflow: hidden;
+    background:
+      radial-gradient(60% 80% at 82% 12%, rgba(255,250,205,.85), rgba(255,242,165,.18) 46%, transparent 70%),
+      linear-gradient(180deg, #4f8bd8 0%, #83b7e8 48%, #cfe7f8 78%, #eaf7fd 100%);
+  }
+  .sun {
+    position: absolute; right: 118px; top: 58px; width: 138px; height: 138px;
+    border-radius: 50%; background: #fff8cf;
+    box-shadow: 0 0 70px 34px rgba(255, 244, 178, .55), 0 0 160px 80px rgba(255, 240, 170, .22);
+  }
+  .cloud { position: absolute; background: #fff; border-radius: 999px; opacity: .8; }
+  .cloud::before, .cloud::after {
+    content: ""; position: absolute; border-radius: 50%; background: #fff;
+  }
+  .cloud.c1 { left: 92px; top: 96px; width: 120px; height: 38px; }
+  .cloud.c1::before { width: 58px; height: 58px; left: 18px; top: -28px; }
+  .cloud.c1::after { width: 40px; height: 40px; left: 66px; top: -16px; }
+  .cloud.c2 { right: 78px; top: 386px; width: 86px; height: 26px; opacity: .32; }
+  .cloud.c2::before { width: 40px; height: 40px; left: 12px; top: -20px; }
+  .cloud.c2::after { width: 28px; height: 28px; left: 48px; top: -12px; }
+
+  .hills {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 260px;
+    background:
+      radial-gradient(120% 100% at 18% 120%, #4a9a67 0 46%, transparent 47%),
+      radial-gradient(140% 100% at 78% 130%, #3d8a5b 0 52%, transparent 53%),
+      linear-gradient(180deg, #77c07c, #2f724b);
+    clip-path: polygon(0 38%, 12% 26%, 26% 42%, 40% 20%, 54% 40%, 68% 24%, 82% 38%, 100% 22%, 100% 100%, 0 100%);
+  }
+  .ground {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 64px;
+    background: linear-gradient(180deg, #5fbe58 0 10px, #2c7246 10px 100%);
+  }
+
+  .badge {
+    position: absolute; left: 76px; top: 96px; width: 372px; height: 372px;
+    border-radius: 84px; overflow: hidden;
+    border: 8px solid rgba(255, 248, 222, .9);
+    box-shadow: 0 30px 60px rgba(15, 47, 78, .38), inset 0 0 0 2px rgba(255,255,255,.4);
+    background: #74b4f0;
+  }
+  .badge img { width: 100%; height: 100%; display: block; }
+  .badge-float {
+    position: absolute; left: 372px; top: 72px; width: 92px; height: 92px;
+    border-radius: 50%; background: linear-gradient(180deg, #ffe483, #f29b12);
+    border: 5px solid #fff7d4;
+    box-shadow: 0 12px 26px rgba(120, 70, 0, .3);
+    display: grid; place-items: center;
+  }
+  .badge-float svg { width: 52px; height: 52px; }
+
+  .copy { position: absolute; left: 512px; top: 96px; width: 610px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-size: 19px; font-weight: 800; letter-spacing: .22em;
+    color: #2a5a86; text-transform: uppercase;
+  }
+  .eyebrow span.dot { width: 9px; height: 9px; border-radius: 50%; background: #f6b62a; }
+  h1 {
+    margin: 14px 0 0;
+    font-size: 92px; line-height: 1.02; letter-spacing: .03em; font-weight: 900;
+    color: #ffdf6e;
+    -webkit-text-stroke: 7px #6a3d0d;
+    paint-order: stroke fill;
+    text-shadow: 0 8px 0 rgba(94, 52, 6, .32), 0 22px 34px rgba(24, 46, 74, .25);
+  }
+  .latin {
+    margin: 10px 0 0; font-size: 21px; font-weight: 800; letter-spacing: .34em; color: #2d6597;
+  }
+  .tagline {
+    margin: 16px 0 0; font-size: 27px; font-weight: 700; color: #1c4368;
+  }
+  .chips { display: flex; gap: 12px; margin-top: 26px; flex-wrap: wrap; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 10px 18px; border-radius: 999px;
+    font-size: 20px; font-weight: 700; color: #123a2a;
+    background: rgba(255, 255, 255, .6);
+    border: 1.5px solid rgba(255, 255, 255, .8);
+    box-shadow: 0 6px 16px rgba(20, 60, 40, .12);
+  }
+  .chip svg { width: 22px; height: 22px; }
+  .cta {
+    display: inline-flex; align-items: center; gap: 12px;
+    margin-top: 30px; padding: 18px 30px; border-radius: 999px;
+    background: linear-gradient(180deg, #ffe99b 0%, #ffd45e 46%, #f2a414 100%);
+    box-shadow: 0 8px 0 #a96609, 0 18px 30px rgba(130, 76, 0, .3);
+    font-size: 28px; font-weight: 900; color: #3a2200;
+    letter-spacing: .04em;
+  }
+  .cta .play {
+    width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+    background: rgba(58, 36, 0, .16); font-size: 16px;
+  }
+  .foot {
+    position: absolute; left: 512px; bottom: 26px;
+    font-size: 16px; font-weight: 700; letter-spacing: .12em;
+    color: rgba(255, 255, 255, .62);
+  }
+  .stars { position: absolute; color: #fff0a8; }
+  .stars.s1 { left: 470px; top: 58px; font-size: 26px; opacity: .9; }
+  .stars.s2 { left: 700px; top: 36px; font-size: 16px; opacity: .65; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="sun"></div>
+  <div class="cloud c1"></div>
+  <div class="cloud c2"></div>
+  <div class="hills"></div>
+  <div class="ground"></div>
+
+  <div class="badge"><img src="../icons/icon.svg" alt="松鼠大作战图标"></div>
+  <div class="badge-float" aria-hidden="true">
+    <svg viewBox="0 0 64 64" fill="none">
+      <ellipse cx="32" cy="38" rx="16" ry="19" fill="#f3d067"/>
+      <ellipse cx="32" cy="22" rx="19" ry="10.5" fill="#7a4a1e"/>
+      <path d="M33 11V4" stroke="#56320f" stroke-width="4" stroke-linecap="round"/>
+      <ellipse cx="25" cy="40" rx="4.5" ry="7" fill="#fff3bd" opacity=".55"/>
+    </svg>
+  </div>
+
+  <div class="copy">
+    <div class="eyebrow"><span class="dot"></span>SQUIRREL QUEST · 横版闯关</div>
+    <h1>松鼠大作战</h1>
+    <p class="latin">S Q U I R R E L   Q U E S T</p>
+    <p class="tagline">收集橡果 · 踩扁史莱姆 · 举起敌人投掷</p>
+    <div class="chips">
+      <span class="chip">🌰 50 关 / 5 个世界</span>
+      <span class="chip">📱 手机触屏</span>
+      <span class="chip">⚡ 即点即玩</span>
+    </div>
+    <div class="cta"><span class="play">▶</span>开始闯关</div>
+  </div>
+
+  <div class="foot">在浏览器中打开 · 无需下载</div>
+  <span class="stars s1">✦</span>
+  <span class="stars s2">✦</span>
+</div>
+</body>
+</html>

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>松鼠大作战 · Squirrel Quest</title>
+<meta name="description" content="收集橡果、踩扁史莱姆、举起敌人投掷！一款可以在手机上玩的横版闯关小游戏。">
+<meta name="theme-color" content="#5c8cdc">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="松鼠大作战">
+<meta property="og:type" content="website">
+<meta property="og:title" content="松鼠大作战 · Squirrel Quest">
+<meta property="og:description" content="收集橡果、踩扁史莱姆、举起敌人投掷！来挑战我的分数吧。">
+<meta property="og:image" content="icons/share-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="icons/icon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="style.css?v=6">
+</head>
+<body>
+<div id="app">
+  <canvas id="game" aria-label="松鼠大作战游戏画面"></canvas>
+  <div id="damage-flash" aria-hidden="true"></div>
+
+  <!-- ── 游戏内 HUD ─────────────────────────────────────── -->
+  <header id="hud" class="is-hidden" aria-hidden="true">
+    <div class="hud-group hud-left">
+      <span class="hud-label">得分</span>
+      <strong id="score" class="hud-score">0</strong>
+    </div>
+    <div class="hud-group hud-center">
+      <span id="level" class="hud-level">第 1 关</span>
+      <span class="acorn-chip"><span class="acorn-dot" aria-hidden="true"></span><span id="acorn-count">0/0</span></span>
+      <span id="key-chip" class="key-chip is-hidden"><span class="key-dot" aria-hidden="true"></span><span id="key-count">0/0</span></span>
+    </div>
+    <div class="hud-group hud-right">
+      <div id="hearts" class="hearts" role="img" aria-label="生命值 3"></div>
+      <button id="btn-mute" class="icon-btn" type="button" aria-label="静音" aria-pressed="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path class="ico-speaker" d="M4 9v6h4l5 4V5L8 9H4z"/><path class="ico-wave" d="M16 8.5c1 .9 1.5 2.1 1.5 3.5S17 14.6 16 15.5"/><path class="ico-wave" d="M18.5 6c1.7 1.6 2.5 3.6 2.5 6s-.8 4.4-2.5 6"/><path class="ico-x" d="M17 9l5 6M22 9l-5 6"/></svg>
+      </button>
+      <button id="btn-pause" class="icon-btn" type="button" aria-label="暂停">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.5"/><rect x="14" y="5" width="4" height="14" rx="1.5"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ── 触屏按键 ───────────────────────────────────────── -->
+  <div id="touch-controls" class="is-hidden" aria-hidden="true">
+    <div class="pad pad-left">
+      <button class="ctrl-btn ctrl-left" data-control="left" type="button" aria-label="向左移动">◀</button>
+      <button class="ctrl-btn ctrl-right" data-control="right" type="button" aria-label="向右移动">▶</button>
+    </div>
+    <div class="pad pad-right">
+      <button class="ctrl-btn ctrl-action" data-control="action" type="button" aria-label="举起或投掷敌人">抓</button>
+      <button class="ctrl-btn ctrl-jump" data-control="jump" type="button" aria-label="跳跃">跳</button>
+    </div>
+    <p class="pad-caption">左侧移动 · 右侧跳跃 · 抓 = 举起 / 投掷</p>
+  </div>
+
+  <!-- ── 第 1 关新手引导 ───────────────────────────────── -->
+  <aside id="tutorial" class="tutorial is-hidden" aria-live="polite" aria-hidden="true">
+    <div class="tutorial-head">
+      <span class="tutorial-badge">新手引导</span>
+      <span id="tutorial-progress" class="tutorial-progress">1/5</span>
+      <button id="btn-tutorial-skip" class="tutorial-skip" type="button">跳过</button>
+    </div>
+    <p id="tutorial-text" class="tutorial-text"></p>
+    <div id="tutorial-dots" class="tutorial-dots" aria-hidden="true"></div>
+  </aside>
+
+  <!-- ── 主菜单 ─────────────────────────────────────────── -->
+  <section id="screen-menu" class="screen is-active" aria-label="主菜单">
+    <div class="screen-card menu-card">
+      <div class="logo-row">
+        <div class="squirrel-badge" aria-hidden="true">
+          <svg class="squirrel-svg" viewBox="0 0 120 120">
+            <defs>
+              <linearGradient id="furGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#eab573"/><stop offset="1" stop-color="#c7843f"/>
+              </linearGradient>
+              <linearGradient id="acornGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#e8c65a"/><stop offset="1" stop-color="#b8891f"/>
+              </linearGradient>
+            </defs>
+            <ellipse cx="65" cy="106" rx="30" ry="7" fill="#1f3a24" opacity=".35"/>
+            <path d="M46 96C12 100 5 59 27 38c16-15 33-7 29 8-4 12-20 10-18 24 1 10 9 14 16 12" fill="url(#furGrad)" stroke="#8f5c25" stroke-width="2.5" stroke-linecap="round"/>
+            <path d="M43 88c-18 0-20-25-8-37 6-6 14-4 14 4 0 8-10 10-8 20 1 6 5 8 8 6" fill="#eec189" opacity=".75"/>
+            <ellipse cx="60" cy="105" rx="13" ry="6.5" fill="#b97c3a"/>
+            <ellipse cx="86" cy="105" rx="13" ry="6.5" fill="#b97c3a"/>
+            <ellipse cx="74" cy="81" rx="27" ry="24" fill="url(#furGrad)"/>
+            <ellipse cx="78" cy="87" rx="17" ry="14" fill="#f8dcae"/>
+            <ellipse cx="92" cy="79" rx="8" ry="5" fill="#d99a52" transform="rotate(-24 92 79)"/>
+            <ellipse cx="99" cy="76" rx="10.5" ry="11.5" fill="url(#acornGrad)"/>
+            <path d="M90 68c5-5 13-5 18 0 0 4-4 7-9 7s-9-3-9-7z" fill="#7a4a1e"/>
+            <path d="M99 63v-5" stroke="#5d3814" stroke-width="2.5" stroke-linecap="round"/>
+            <ellipse cx="75" cy="46" rx="25" ry="22" fill="url(#furGrad)"/>
+            <ellipse cx="58" cy="24" rx="10" ry="14" fill="#d99a52" transform="rotate(-16 58 24)"/>
+            <ellipse cx="58.5" cy="25" rx="5" ry="8" fill="#f1bfae" transform="rotate(-16 58.5 25)"/>
+            <ellipse cx="92" cy="23" rx="10" ry="14" fill="#d99a52" transform="rotate(16 92 23)"/>
+            <ellipse cx="91.5" cy="24" rx="5" ry="8" fill="#f1bfae" transform="rotate(16 91.5 24)"/>
+            <ellipse cx="82" cy="56" rx="17" ry="13" fill="#f8dcae"/>
+            <circle cx="70" cy="55" r="6" fill="#f2a68f" opacity=".4"/>
+            <circle cx="86" cy="43" r="4.6" fill="#2b1a0e"/>
+            <circle cx="87.6" cy="41.4" r="1.7" fill="#fff"/>
+            <ellipse cx="99" cy="53" rx="4" ry="3" fill="#b34a3c"/>
+            <path d="M93 60c2 2 5 2 7 0" stroke="#8a5a2b" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+          </svg>
+          <span class="badge-spark spark-1">✦</span>
+          <span class="badge-spark spark-2">✦</span>
+        </div>
+        <div class="logo-text">
+          <h1>松鼠大作战</h1>
+          <p class="latin">SQUIRREL QUEST</p>
+          <p class="tagline">收集橡果 · 踩扁史莱姆 · 投掷连击</p>
+        </div>
+      </div>
+
+      <div id="challenge-banner" class="challenge is-hidden">
+        <span class="challenge-icon" aria-hidden="true">🏆</span>
+        <span>好友向你发起挑战：<strong id="challenge-score">0</strong> 分</span>
+      </div>
+
+      <div class="menu-stats">
+        <div class="stat"><span>最高分</span><strong id="best-score">0</strong></div>
+        <div class="stat-sep" aria-hidden="true"></div>
+        <div class="stat"><span>关卡</span><strong>80</strong></div>
+        <div class="stat-sep" aria-hidden="true"></div>
+        <div class="stat"><span>玩法</span><strong class="stat-text">闯关</strong></div>
+      </div>
+
+      <button id="btn-start" class="btn btn-primary btn-lg btn-start" type="button">
+        <span class="btn-start-icon" aria-hidden="true">▶</span>开始游戏
+      </button>
+
+      <div class="level-select-wrap">
+        <div class="level-select-head">
+          <span>选择关卡</span>
+          <span id="level-progress" class="level-progress">已解锁 1/80</span>
+        </div>
+        <div id="level-select" class="level-select" role="group" aria-label="选择关卡"></div>
+      </div>
+
+      <p class="hint control-hint">手机：左侧移动 · 右侧跳跃 · 抓 = 举起 / 投掷</p>
+      <p class="hint control-hint control-hint-desktop">键盘：← → 移动 · 空格跳跃 · F 举起 / 投掷 · ESC 暂停</p>
+
+      <div class="menu-actions">
+        <button id="btn-menu-share" class="btn btn-ghost" type="button">分享给好友</button>
+        <button id="btn-menu-sound" class="btn btn-ghost" type="button" aria-pressed="false">音效：开</button>
+        <button id="btn-fullscreen" class="btn btn-ghost" type="button">全屏</button>
+        <button id="btn-install" class="btn btn-ghost is-hidden" type="button">安装到桌面</button>
+      </div>
+
+      <p class="footnote">🌰 收集全部橡果即可过关 · 80 关 / 8 个世界 · ✨ 金橡果是隐藏奖励</p>
+    </div>
+  </section>
+
+  <!-- ── 暂停 ───────────────────────────────────────────── -->
+  <section id="screen-pause" class="screen" aria-label="暂停">
+    <div class="screen-card pause-card">
+      <p class="eyebrow">PAUSED</p>
+      <h2>暂停</h2>
+      <p class="muted">松鼠也要喘口气～</p>
+      <div class="btn-column">
+        <button id="btn-resume" class="btn btn-primary btn-lg" type="button">继续游戏</button>
+        <button id="btn-pause-share" class="btn btn-ghost" type="button">分享给好友</button>
+        <button id="btn-pause-restart" class="btn btn-ghost" type="button">重新开始</button>
+        <button id="btn-pause-menu" class="btn btn-ghost" type="button">回到主页</button>
+      </div>
+      <p class="hint tiny">按 ESC 或点击暂停键继续</p>
+    </div>
+  </section>
+
+  <!-- ── 结算 ───────────────────────────────────────────── -->
+  <section id="screen-result" class="screen" aria-label="关卡结算">
+    <div class="screen-card result-card">
+      <p id="result-eyebrow" class="eyebrow">LEVEL CLEAR</p>
+      <h2 id="result-title">关卡完成！</h2>
+      <div class="result-score">
+        <span>本局得分</span>
+        <strong id="result-score">0</strong>
+      </div>
+      <p id="result-detail" class="result-detail"></p>
+      <div id="challenge-result" class="challenge is-hidden"></div>
+      <p class="result-best">最高分 <strong id="result-best">0</strong></p>
+      <div class="btn-column">
+        <button id="btn-result-primary" class="btn btn-primary btn-lg" type="button">进入下一关</button>
+        <button id="btn-result-share" class="btn btn-share" type="button">分享成绩</button>
+        <button id="btn-result-menu" class="btn btn-ghost" type="button">回到主页</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 分享面板 ───────────────────────────────────────── -->
+  <div id="share-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="share-title" aria-hidden="true">
+    <div class="modal-card">
+      <button id="btn-share-close" class="modal-close" type="button" aria-label="关闭">×</button>
+      <h2 id="share-title">分享给好友</h2>
+      <p class="muted share-sub">生成一张成绩卡，好友点开链接就能挑战你</p>
+      <div class="share-preview">
+        <div id="share-loading" class="share-loading">正在生成成绩卡…</div>
+        <img id="share-image" alt="松鼠大作战成绩分享卡片" hidden>
+      </div>
+      <div class="share-url" id="share-url" tabindex="0"></div>
+      <div class="btn-row">
+        <button id="btn-share-native" class="btn btn-primary" type="button">分享</button>
+        <button id="btn-share-download" class="btn btn-ghost" type="button">保存图片</button>
+        <button id="btn-share-copy" class="btn btn-ghost" type="button">复制链接</button>
+      </div>
+      <p class="hint tiny">好友打开链接后，主页会显示你的挑战分数</p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <div id="fatal" class="fatal is-hidden" role="alert">
+    <strong>游戏遇到了问题</strong>
+    <p id="fatal-message"></p>
+    <button id="btn-fatal-reload" class="btn btn-ghost" type="button">重新加载</button>
+  </div>
+</div>
+
+<noscript>
+  <div class="noscript">请启用 JavaScript 后再开始游戏。</div>
+</noscript>
+
+<script src="engine.js?v=6"></script>
+<script src="game.js?v=6"></script>
+</body>
+</html>

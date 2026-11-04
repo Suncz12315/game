@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="松鼠大作战图标">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#74b4f0"/>
+      <stop offset="0.55" stop-color="#5e9ad8"/>
+      <stop offset="1" stop-color="#2f6b47"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.5">
+      <stop offset="0" stop-color="#fff2b8" stop-opacity="0.9"/>
+      <stop offset="0.5" stop-color="#ffe28a" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ffe28a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="furGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0be7c"/>
+      <stop offset="1" stop-color="#c7843f"/>
+    </linearGradient>
+    <linearGradient id="acornGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2d268"/>
+      <stop offset="1" stop-color="#b8891f"/>
+    </linearGradient>
+    <linearGradient id="hill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#58a562"/>
+      <stop offset="1" stop-color="#2c7248"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" fill="url(#sky)"/>
+  <circle cx="256" cy="230" r="200" fill="url(#glow)"/>
+
+  <!-- 太阳 -->
+  <circle cx="388" cy="120" r="46" fill="#fff6c8" opacity="0.85"/>
+  <circle cx="388" cy="120" r="72" fill="#fff2b0" opacity="0.18"/>
+
+  <!-- 云 -->
+  <g fill="#ffffff" opacity="0.8">
+    <circle cx="92" cy="132" r="26"/>
+    <circle cx="122" cy="120" r="34"/>
+    <circle cx="154" cy="134" r="24"/>
+    <rect x="92" y="130" width="62" height="26" rx="13"/>
+  </g>
+  <g fill="#ffffff" opacity="0.45">
+    <circle cx="358" cy="212" r="18"/>
+    <circle cx="380" cy="204" r="24"/>
+    <circle cx="404" cy="214" r="16"/>
+    <rect x="358" y="210" width="46" height="18" rx="9"/>
+  </g>
+
+  <!-- 远山与草地 -->
+  <path d="M0 384 C 70 340 132 336 196 372 C 258 408 306 344 376 348 C 432 351 474 374 512 358 V512 H0 Z" fill="#4a9a67" opacity="0.65"/>
+  <path d="M0 432 C 84 398 150 428 218 424 C 296 420 356 386 430 410 C 464 421 492 438 512 432 V512 H0 Z" fill="url(#hill)"/>
+  <g fill="#72c877">
+    <path d="M36 438 l7 -24 l7 24 z"/>
+    <path d="M84 446 l6 -20 l6 20 z"/>
+    <path d="M432 440 l7 -22 l7 22 z"/>
+    <path d="M470 450 l6 -18 l6 18 z"/>
+    <path d="M136 452 l5 -16 l5 16 z"/>
+  </g>
+
+  <!-- 小橡果点缀 -->
+  <g transform="translate(84 268) scale(2.4)" opacity="0.95">
+    <ellipse cx="0" cy="4" rx="9" ry="11" fill="url(#acornGrad)" stroke="#8a6420" stroke-width="1"/>
+    <ellipse cx="0" cy="-5" rx="10.5" ry="6" fill="#7a4a1e"/>
+    <path d="M1 -11 v-5" stroke="#56320f" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <!-- 松鼠 -->
+  <g transform="translate(78 62) scale(3.28)">
+    <ellipse cx="65" cy="106" rx="30" ry="7" fill="#1f3a24" opacity=".32"/>
+    <path d="M46 96C12 100 5 59 27 38c16-15 33-7 29 8-4 12-20 10-18 24 1 10 9 14 16 12" fill="url(#furGrad)" stroke="#8f5c25" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M43 88c-18 0-20-25-8-37 6-6 14-4 14 4 0 8-10 10-8 20 1 6 5 8 8 6" fill="#eec189" opacity=".78"/>
+    <ellipse cx="60" cy="105" rx="13" ry="6.5" fill="#b97c3a"/>
+    <ellipse cx="86" cy="105" rx="13" ry="6.5" fill="#b97c3a"/>
+    <ellipse cx="74" cy="81" rx="27" ry="24" fill="url(#furGrad)"/>
+    <ellipse cx="78" cy="87" rx="17" ry="14" fill="#f8dcae"/>
+    <ellipse cx="92" cy="79" rx="8" ry="5" fill="#d99a52" transform="rotate(-24 92 79)"/>
+    <ellipse cx="99" cy="76" rx="10.5" ry="11.5" fill="url(#acornGrad)"/>
+    <path d="M90 68c5-5 13-5 18 0 0 4-4 7-9 7s-9-3-9-7z" fill="#7a4a1e"/>
+    <path d="M99 63v-5" stroke="#5d3814" stroke-width="2.5" stroke-linecap="round"/>
+    <ellipse cx="75" cy="46" rx="25" ry="22" fill="url(#furGrad)"/>
+    <ellipse cx="58" cy="24" rx="10" ry="14" fill="#d99a52" transform="rotate(-16 58 24)"/>
+    <ellipse cx="58.5" cy="25" rx="5" ry="8" fill="#f1bfae" transform="rotate(-16 58.5 25)"/>
+    <ellipse cx="92" cy="23" rx="10" ry="14" fill="#d99a52" transform="rotate(16 92 23)"/>
+    <ellipse cx="91.5" cy="24" rx="5" ry="8" fill="#f1bfae" transform="rotate(16 91.5 24)"/>
+    <ellipse cx="82" cy="56" rx="17" ry="13" fill="#f8dcae"/>
+    <circle cx="70" cy="55" r="6" fill="#f2a68f" opacity=".4"/>
+    <circle cx="86" cy="43" r="4.6" fill="#2b1a0e"/>
+    <circle cx="87.6" cy="41.4" r="1.7" fill="#fff"/>
+    <ellipse cx="99" cy="53" rx="4" ry="3" fill="#b34a3c"/>
+    <path d="M93 60c2 2 5 2 7 0" stroke="#8a5a2b" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+  </g>
+
+  <!-- 闪光 -->
+  <g fill="#ffeaa0" opacity="0.9">
+    <path d="M142 76 l4 10 l10 4 l-10 4 l-4 10 l-4 -10 l-10 -4 l10 -4 z"/>
+    <path d="M410 282 l3 7 l7 3 l-7 3 l-3 7 l-3 -7 l-7 -3 l7 -3 z" opacity=".8"/>
+    <circle cx="118" cy="214" r="4" opacity=".6"/>
+    <circle cx="420" cy="180" r="5" opacity=".55"/>
+  </g>
+</svg>
