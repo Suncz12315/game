@@ -2339,6 +2339,10 @@
         syncScreens();
       }
     });
+    // 切后台/锁屏时也可能丢抬起事件，隐藏即清空输入状态
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) resetInput();
+    });
 
     document.querySelectorAll('[data-control]').forEach((btn) => {
       const key = btn.dataset.control;

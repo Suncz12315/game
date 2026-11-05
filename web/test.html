@@ -212,6 +212,27 @@
     assert(!p.didJump, '空中不应起跳');
   });
 
+  test('按住跳跃键不会连跳（边沿触发回归）', () => {
+    const tm = new E.TileMap(['      ', '      ', '######']);
+    const p = new E.Player(20, 0);
+    for (let i = 0; i < 30; i++) p.update({}, tm);
+    assert(p.onGround, '应落地');
+    p.update({ jump: true }, tm);
+    assert(p.didJump, '按下应起跳');
+    // 一直按住直到重新落地：期间不应再次起跳（修复前会落地自动连跳）
+    let rejumps = 0;
+    for (let i = 0; i < 120; i++) {
+      p.update({ jump: true }, tm);
+      if (p.didJump) rejumps++;
+    }
+    eq(rejumps, 0, '按住不放不应再次起跳');
+    assert(p.onGround, '120 帧后应已落地');
+    // 松开后重新按下，可以正常再跳
+    for (let i = 0; i < 5; i++) p.update({}, tm);
+    p.update({ jump: true }, tm);
+    assert(p.didJump, '重新按下应能起跳');
+  });
+
   test('水平碰撞阻挡', () => {
     const tm = new E.TileMap(['####', '####']);
     const p = new E.Player(10, 10);
@@ -371,6 +392,12 @@
       while (q.length) {
         const [x, y] = q.pop();
         const onSpring = m.tileType(x, y) === 'S';
+        // 弹簧的正上方净空：被地形盖顶的弹簧跳不高
+        let springRise = 8;
+        if (onSpring) {
+          springRise = 0;
+          for (let d = 1; d <= 8 && !m.isSolid(x, y - d); d++) springRise = d;
+        }
         for (let dx = -5; dx <= 5; dx++) {
           for (let dy = -12; dy <= 10; dy++) {
             const nx = x + dx;
@@ -380,7 +407,7 @@
             const gap = Math.abs(dx);
             let ok;
             if (isW(x, y)) ok = (nx === x) || (rise <= 1 && gap <= 2);
-            else if (onSpring) ok = rise <= 8 && gap <= 3;
+            else if (onSpring) ok = rise <= springRise && gap <= 3;
             else ok = hopOK(Math.max(0, rise), gap);
             if (!ok) continue;
             const k = nx + ',' + ny;
@@ -405,6 +432,20 @@
       for (const a of m.acorns) assert(hit(a.x, a.y), `第 ${i} 关橡果 (${a.x / E.TILE | 0},${a.y / E.TILE | 0}) 不可达`);
       for (const a of m.goldenAcorns) assert(hit(a.x, a.y), `第 ${i} 关金橡果不可达`);
       for (const c of m.checkpoints) assert(hit(c.x, c.y), `第 ${i} 关检查点不可达`);
+    }
+  });
+
+  test('80 关弹簧正上方全部净空（不被地形盖顶）', () => {
+    // 弹簧升限约 8 格：通道里有实心地形就会撞头，弹簧形同虚设
+    for (let i = 1; i <= 80; i++) {
+      const m = E.loadLevel(i);
+      for (const s of m.springs) {
+        const sx = Math.floor(s.x / E.TILE);
+        const sy = Math.floor(s.y / E.TILE);
+        let clear = 0;
+        for (let d = 1; d <= 8 && !m.isSolid(sx, sy - d); d++) clear = d;
+        assert(clear >= 8, `第 ${i} 关弹簧 (${sx},${sy}) 上方净空仅 ${clear} 格`);
+      }
     }
   });
 

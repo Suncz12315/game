@@ -306,6 +306,9 @@
       this.throwCooldown = 0;
       this.didJump = false;
       this.moving = false;
+      this.jumpHeld = false;        // 上一帧跳跃键状态（边沿检测用）
+      this.jumpBuffer = 0;          // 预输入缓冲：落地前按键也能起跳
+      this.coyote = 0;              // 土狼时间：走下平台后短暂可跳
     }
 
     update(input, tm) {
@@ -327,10 +330,22 @@
         this.moving = false;
       }
 
-      // 跳跃（按住可持续连跳，与原版一致）
-      if (input.jump && this.onGround) {
+      // 跳跃：边沿触发，按一次跳一次。
+      // 原来是按住就连跳（input.jump && onGround），一旦输入层因浏览器
+      // 手势/焦点异常丢了抬起事件，跳跃状态卡住就会落地自动起跳、永远
+      // 停不下来。边沿触发后即使状态卡住也最多多跳一次。
+      const jumpDown = !!input.jump;
+      const jumpPressed = jumpDown && !this.jumpHeld;
+      this.jumpHeld = jumpDown;
+      if (jumpPressed) this.jumpBuffer = 8;                 // 8 帧预输入窗口
+      else if (this.jumpBuffer > 0) this.jumpBuffer -= 1;
+      if (this.onGround) this.coyote = 6;                   // 6 帧土狼时间
+      else if (this.coyote > 0) this.coyote -= 1;
+      if (this.jumpBuffer > 0 && (this.onGround || this.coyote > 0)) {
         this.vy = PLAYER_JUMP;
         this.onGround = false;
+        this.coyote = 0;
+        this.jumpBuffer = 0;
         this.didJump = true;
       }
 
@@ -521,6 +536,16 @@
     return false;
   }
 
+  const SOLID_TILES = ['#', '@', '=', '~', 'L'];
+  // 弹簧正上方 rows 格内不能有实心地形，否则弹起来直接撞头。
+  // （弹簧升限约 8 格，用户报障：L8/L9 弹簧被头顶地形堵死跳不上去）
+  function shaftClear(g, x, y, rows) {
+    for (let d = 1; d <= rows; d++) {
+      if (SOLID_TILES.includes(g.get(x, y - d))) return false;
+    }
+    return true;
+  }
+
   class LevelGrid {
     constructor(w, h) {
       this.w = w;
@@ -572,6 +597,7 @@
       this.rng = rng;
       this.nodes = [];           // 主路径落脚点 {x, y, wide, high}
       this.reserved = new Set(); // 已被机关占用的格子（'x,y'）
+      this.springCells = [];     // 已放置弹簧的格子（垂直通道保护用）
       this.spikeSpots = [];      // 可以放尖刺的地面格
       this.features = { spring: 0, crumble: 0, keys: 0, wind: 0, saws: 0, spikes: 0 };
     }
@@ -682,22 +708,30 @@
     let dir = 1;
     while (prev.sy > 5) {
       const cx = Math.round((prev.x0 + prev.x1) / 2);
-      // 先确认弹簧放得下，再按弹簧规则拔高（放不下就退回普通跳）
+      // 先确认弹簧放得下且上方 8 格净空，再按弹簧规则拔高（放不下就退回普通跳）
       let useSpring = ctx.mech.spring && rng() < 0.3 && prev.sy > 10;
       // 弹簧放朝向新平台一侧的边缘，保证从弹簧格起跳水平间距 ≤ 3
       const springX = dir > 0 ? prev.x1 : prev.x0;
-      if (useSpring && g.get(springX, prev.sy) !== ' ') useSpring = false;
+      if (useSpring && (g.get(springX, prev.sy) !== ' ' || !shaftClear(g, springX, prev.sy, 8))) {
+        useSpring = false;
+      }
       const rise = useSpring ? 4 + Math.floor(rng() * 3) : 2 + Math.floor(rng() * 2);
       const len = 2 + Math.floor(rng() * 3);
       const sy = prev.sy - rise;
       if (sy < 3) break;
-      let x0 = cx + dir * (2 + Math.floor(rng() * 3)) - Math.floor(len / 2);
+      // 弹簧跳的目标平台必须水平错开（gap 1~3）：盖住弹簧正上方会撞头
+      let x0 = useSpring
+        ? (dir > 0 ? prev.x1 + 1 + Math.floor(rng() * 2) : prev.x0 - len - Math.floor(rng() * 2))
+        : cx + dir * (2 + Math.floor(rng() * 3)) - Math.floor(len / 2);
       x0 = Math.max(0, Math.min(g.w - len, x0));
       let next = { x0, x1: x0 + len - 1, sy };
+      // 新平台也不能盖住任何已放置弹簧的垂直通道
+      const blocksSpring = (p) => ctx.springCells.some(
+        (sc) => sc.x >= p.x0 && sc.x <= p.x1 && sc.y - (p.sy + 1) >= 1 && sc.y - (p.sy + 1) <= 8);
       // 保证可达：超出跳跃约束就一格一格往回拉
       const reachable = (p) =>
-        useSpring ? (rise <= 8 && platGap(prev, p) <= 3)
-                  : hopGapOK(rise, platGap(prev, p));
+        (useSpring ? (() => { const gap = platGap(prev, p); return rise <= 8 && gap >= 1 && gap <= 3; })()
+                   : hopGapOK(rise, platGap(prev, p))) && !blocksSpring(p);
       let guard = 0;
       while (!reachable(next) && guard++ < g.w) {
         next.x0 += next.x0 > prev.x0 ? -1 : 1;
@@ -708,6 +742,7 @@
       if (useSpring) {
         g.set(springX, prev.sy, 'S');
         ctx.reserve(springX, prev.sy);
+        ctx.springCells.push({ x: springX, y: prev.sy });
         ctx.features.spring++;
       }
       const ch = ctx.mech.crumble && rng() < 0.2 ? '~' : '=';
@@ -838,7 +873,9 @@
       // 弹簧钉在岛链前进方向的边缘格，保证从弹簧格起跳水平间距 ≤ 3
       let springX = -1;
       if (ctx.mech.spring && rng() < 0.18 && rng() < 0.6) {
-        if (g.get(prev.x1, prev.sy) === ' ') springX = prev.x1;
+        if (g.get(prev.x1, prev.sy) === ' ' && shaftClear(g, prev.x1, prev.sy, 8)) {
+          springX = prev.x1;
+        }
       }
       const useSpring = springX >= 0;
       let rise;
@@ -864,6 +901,7 @@
       if (useSpring) {
         g.set(springX, prev.sy, 'S');
         ctx.reserve(springX, prev.sy);
+        ctx.springCells.push({ x: springX, y: prev.sy });
         ctx.features.spring++;
       }
       const ch = ctx.mech.crumble && rng() < 0.3 ? '~' : '=';
@@ -961,20 +999,41 @@
     g.set(px, start.y, 'P');
     used.add(cellKey(px, start.y));
 
-    // 弹簧彩蛋：弹簧 + 高空奖励平台（地面型关卡从中学会用弹簧）
+    // 弹簧彩蛋：弹簧 + 侧上方奖励平台（地面型关卡从中学会用弹簧）。
+    // 弹簧正上方 8 格必须净空、奖励平台必须与弹簧列水平错开——
+    // 否则弹起来直接撞平台底/地形，永远跳不上去（L8/L9 报障的 bug）。
     const bonusSprings = () => {
       if (!mech.spring || ctx.features.spring > 0) return;
       const spots = nodes.filter((n) => n.wide && n.x > 8 && n.x < g.w - 6 && n.y >= 9);
       const count = 1 + (rng() < 0.4 ? 1 : 0);
       for (let s = 0; s < count && spots.length; s++) {
         const n = spots.splice(Math.floor(rng() * spots.length), 1)[0];
-        if (!freeCell(n.x, n.y)) continue;
+        if (!freeCell(n.x, n.y) || !shaftClear(g, n.x, n.y, 8)) continue;
+        const plen = 2 + Math.floor(rng() * 2);
+        const dir = rng() < 0.5 ? -1 : 1;
+        const rise = 6 + Math.floor(rng() * 2);             // 站立行抬升 6~7 格
+        const standY = n.y - rise;
+        if (standY < 2) continue;
+        // 平台水平错开 2~3 格：直弹过顶后侧移即可落上去
+        let bx = dir > 0 ? n.x + 2 : n.x - 2 - plen + 1;
+        bx = Math.max(0, Math.min(g.w - plen, bx));
+        if (bx <= n.x && n.x <= bx + plen - 1) continue;    // 不能盖住弹簧列
+        let bad = false;
+        for (let i = 0; i < plen; i++) {
+          if (g.get(bx + i, standY + 1) !== ' ') bad = true;        // 平台行被占
+          if (g.get(bx + i, standY) !== ' ') bad = true;            // 站立行被占
+        }
+        // 也不能盖住之前已放置弹簧的垂直通道
+        for (const sc of ctx.springCells) {
+          if (sc.x >= bx && sc.x <= bx + plen - 1 &&
+              sc.y - (standY + 1) >= 1 && sc.y - (standY + 1) <= 8) bad = true;
+        }
+        if (bad) continue;
         g.set(n.x, n.y, 'S');
         used.add(cellKey(n.x, n.y));
+        ctx.springCells.push({ x: n.x, y: n.y });
         ctx.features.spring++;
-        const plen = 2 + Math.floor(rng() * 2);
-        const bx = Math.max(0, Math.min(g.w - plen, n.x - 1));
-        ctx.addPlatform(bx, n.y - 7, plen, '=', { high: true });
+        ctx.addPlatform(bx, standY, plen, '=', { high: true });
       }
     };
     bonusSprings();
