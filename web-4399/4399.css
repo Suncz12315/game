@@ -1,0 +1,45 @@
+/* 4399 平台适配：隐藏平台不需要的分享 / 全屏 / PWA 按钮，保留游戏本体。 */
+#btn-menu-share,
+#btn-pause-share,
+#btn-result-share,
+#btn-fullscreen,
+#btn-install {
+  display: none !important;
+}
+
+/* 4399 要求游戏内保留常驻平台标识。审核前把官方 logo 放到 icons/4399-logo.png。 */
+#platform-badge {
+  position: fixed;
+  left: 50%;
+  bottom: calc(5px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: 9999;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.9;
+}
+
+#platform-badge img {
+  display: block;
+  height: 24px;
+  width: auto;
+  max-width: 120px;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.45));
+}
+
+#platform-badge span {
+  display: none;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.42);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+#platform-badge.is-fallback img { display: none; }
+#platform-badge.is-fallback span { display: inline-block; }
