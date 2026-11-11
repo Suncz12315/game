@@ -69,22 +69,28 @@ python3 -m http.server 8080
 - `index.html` 可直接作为目录默认页访问
 - `.webmanifest` 以 `application/manifest+json`（或至少 `application/json`）返回
 
+### 5. Ubuntu VPS（deploy.sh，按子域名区分游戏）
+
+本游戏域名是 **squirrel.playkk.top**。仓库自带一键脚本，会在服务器上装 nginx、按子域名建独立站点并自动申请 HTTPS 证书：
+
+```bash
+cd web
+./deploy.sh user@服务器IP        # 默认域名 squirrel.playkk.top
+```
+
+前提是域名已解析到服务器 IP。同一台服务器可以托管多个游戏：**每个游戏一个子域名**（如 `squirrel.playkk.top`、`xxx.playkk.top`），每个子域名有独立的站点目录（`/var/www/<域名>`）和 nginx 配置（`/etc/nginx/sites-available/<域名>`），互不影响，可各自反复部署。
+
 ### 部署后：让链接预览图正常显示
 
-社交平台（微信、X、Facebook、Slack 等）抓取 OG 信息时不会解析相对路径。部署完成后，编辑 `index.html`，把：
+社交平台（微信、X、Facebook、Slack 等）抓取 OG 信息时不会解析相对路径，因此 `index.html` 里已预置了正式域名的绝对地址：
 
 ```html
-<meta property="og:image" content="icons/share-card.png">
+<meta property="og:image" content="https://squirrel.playkk.top/icons/share-card.png">
+<meta property="og:url" content="https://squirrel.playkk.top/">
+<link rel="canonical" href="https://squirrel.playkk.top/">
 ```
 
-改成你的完整公网地址，例如：
-
-```html
-<meta property="og:image" content="https://your-domain.com/icons/share-card.png">
-<meta property="og:url" content="https://your-domain.com/">
-```
-
-建议同时加一条 `<link rel="canonical" href="https://your-domain.com/">`。改完后可用平台自带的调试工具刷新缓存（如 Facebook Sharing Debugger、X Card Validator），微信则需要重新分享或等待缓存过期。
+如果以后换域名，把这三处一起改掉即可。改完后可用平台自带的调试工具刷新缓存（如 Facebook Sharing Debugger、X Card Validator），微信则需要重新分享或等待缓存过期。
 
 ### 更新版本时
 
@@ -94,7 +100,7 @@ python3 -m http.server 8080
 const CACHE_VERSION = 'squirrel-quest-v6';
 ```
 
-改成 `v6`、`v7`…… 同时把 `SHELL` 和 `index.html` 里的 `style.css?v=` / `engine.js?v=` / `game.js?v=` 一起加一，这样已安装 PWA 的用户下次打开会自动换到新缓存。当前版本是 v6（80 关 + 新手引导）。Service Worker 在 `localhost` 下会被刻意跳过，避免本地开发时缓存旧文件；部署到正式域名后自动生效。
+改成 `v6`、`v7`…… 同时把 `SHELL` 和 `index.html` 里的 `style.css?v=` / `engine.js?v=` / `game.js?v=` 一起加一，这样已安装 PWA 的用户下次打开会自动换到新缓存。当前版本是 v7（80 关 + 新手引导）。Service Worker 在 `localhost` 下会被刻意跳过，避免本地开发时缓存旧文件；部署到正式域名后自动生效。
 
 ---
 

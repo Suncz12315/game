@@ -1,13 +1,13 @@
 /* 松鼠大作战 · 离线缓存
  * 静态站没有构建流程，改动页面后把 CACHE_VERSION 加一即可让老用户更新。
  */
-const CACHE_VERSION = 'squirrel-quest-v6';
+const CACHE_VERSION = 'squirrel-quest-v7';
 const SHELL = [
   './',
   './index.html',
-  './style.css?v=6',
-  './engine.js?v=6',
-  './game.js?v=6',
+  './style.css?v=7',
+  './engine.js?v=7',
+  './game.js?v=7',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-32.png',

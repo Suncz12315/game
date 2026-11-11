@@ -56,6 +56,7 @@
 
   // ─── DOM ───────────────────────────────────────────────
   const canvas = $('#game');
+  const app = $('#app');
   const ctx = canvas.getContext('2d', { alpha: false });
   const ui = {
     hud: $('#hud'),
@@ -83,6 +84,7 @@
     menuShare: $('#btn-menu-share'),
     menuSound: $('#btn-menu-sound'),
     fullscreen: $('#btn-fullscreen'),
+    landscape: $('#btn-landscape'),
     install: $('#btn-install'),
     challengeBanner: $('#challenge-banner'),
     challengeScore: $('#challenge-score'),
@@ -305,6 +307,8 @@
   // ─── 运行时状态 ────────────────────────────────────────
   let isTouch = detectTouch();
   let isPortrait = false;
+  let fakeLandscape = false;
+  let fakeFromPortrait = false;
   let cssW = 1;
   let cssH = 1;
   let dpr = 1;
@@ -317,6 +321,12 @@
   let camSnap = true;
 
   const input = { left: false, right: false, jump: false };
+  // 所有触点的统一登记表（pointerId -> 按钮元素）。
+  // 旧版每个按钮各自记一个 Set，而 resetInput 只清 input 不清 Set：
+  // 手指按住时一旦失焦/切后台，浏览器可能把抬起事件吞掉，Set 里残留的
+  // pointerId 会让 release 永远等不到「全部松开」，方向键就此卡死
+  // （松鼠一直向前跑，怎么松手都停不下来）。
+  const controlPointers = new Map();
   let visualT = 0;
   let levelIntroT = 0;
   let levelIntroName = '';
@@ -523,7 +533,15 @@
 
   // ─── 视口 / 布局 ───────────────────────────────────────
   function applyLayout() {
-    isPortrait = innerHeight > innerWidth * 1.04;
+    // 假横屏期间设备从竖屏真转横（系统没锁方向）：退出旋转容器，交给系统布局。
+    // 注意判断「进入假横屏时是竖屏」，否则桌面浏览器（恒为横屏）一开就被自动退出。
+    if (fakeLandscape && fakeFromPortrait && innerWidth > innerHeight) {
+      fakeLandscape = false;
+      fakeFromPortrait = false;
+      document.body.classList.remove('fake-landscape');
+      updateLandscapeLabel();
+    }
+    isPortrait = !fakeLandscape && innerHeight > innerWidth * 1.04;
     document.body.classList.toggle('is-touch', isTouch);
     document.body.classList.toggle('is-portrait', isPortrait);
   }
@@ -549,9 +567,19 @@
   }
 
   function resize() {
-    const rect = canvas.getBoundingClientRect();
-    const w = Math.max(1, rect.width);
-    const h = Math.max(1, rect.height);
+    // 假横屏：容器被旋转 90°，逻辑宽高互换。
+    if (fakeLandscape) {
+      app.style.width = `${innerHeight}px`;
+      app.style.height = `${innerWidth}px`;
+    } else {
+      app.style.width = '';
+      app.style.height = '';
+    }
+    // 画布尺寸必须用 offsetWidth/offsetHeight（布局尺寸，不受 transform 影响），
+    // 而不是 getBoundingClientRect：假横屏旋转 90° 后 bounding rect 返回的是
+    // 旋转后的视觉宽高，拿它设画布位图会让画面横竖颠倒、整体拉伸变形。
+    const w = Math.max(1, canvas.offsetWidth || canvas.clientWidth || 1);
+    const h = Math.max(1, canvas.offsetHeight || canvas.clientHeight || 1);
     cssW = w;
     cssH = h;
 
@@ -2256,34 +2284,100 @@
     requestWakeLock();
   }
 
+  function isFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+
+  function exitFullscreenIfNeeded() {
+    if (!isFullscreen()) return;
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) {
+      try {
+        const p = exit.call(document);
+        if (p && p.catch) p.catch(() => {});
+      } catch (_) { /* ignore */ }
+    }
+  }
+
+  function unlockOrientation() {
+    try {
+      if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock();
+    } catch (_) { /* ignore */ }
+  }
+
+  // Promise 限时等待：兑现/拒绝/超时统一收敛为布尔值
+  function withTimeout(p, ms) {
+    return Promise.race([
+      Promise.resolve(p).then(() => true, () => false),
+      new Promise((resolve) => setTimeout(() => resolve(false), ms)),
+    ]);
+  }
+
+  // 真·横屏：全屏 + 锁定屏幕方向（安卓 Chrome 支持）。返回是否成功。
+  async function lockLandscape() {
+    const el = document.documentElement;
+    const reqFs = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!reqFs) return false;
+    if (!isFullscreen()) {
+      try {
+        // 个别环境（受限 WebView / 无头浏览器）请求会永远挂起，加超时兜底
+        await withTimeout(reqFs.call(el, { navigationUI: 'hide' }), 1200);
+      } catch (_) { /* ignore */ }
+      if (!isFullscreen()) return false;
+    }
+    if (screen.orientation && screen.orientation.lock) {
+      try {
+        if (await withTimeout(screen.orientation.lock('landscape'), 1200)) return true;
+      } catch (_) { /* ignore */ }
+    }
+    return false;
+  }
+
   function maybeAutoFullscreen() {
     if (!isTouch) return;
-    const el = document.documentElement;
-    const fn = el.requestFullscreen || el.webkitRequestFullscreen;
-    if (!fn || document.fullscreenElement) return;
-    try {
-      const p = fn.call(el, { navigationUI: 'hide' });
-      if (p && p.catch) p.catch(() => {});
-    } catch (_) { /* ignore */ }
-    try {
-      if (screen.orientation && screen.orientation.lock) {
-        const p = screen.orientation.lock('landscape');
-        if (p && p.catch) p.catch(() => {});
-      }
-    } catch (_) { /* ignore */ }
+    lockLandscape().then(() => updateLandscapeLabel());
+  }
+
+  // 切换横屏：优先全屏锁定方向；不支持锁向时（iOS Safari、微信等
+  // 内置浏览器常锁竖屏）退化为「假横屏」——整页旋转 90°，横握手机即可。
+  async function toggleLandscape() {
+    if (fakeLandscape) {
+      setFakeLandscape(false);
+      return;
+    }
+    if (isFullscreen()) {
+      unlockOrientation();
+      exitFullscreenIfNeeded();
+      updateLandscapeLabel();
+      return;
+    }
+    if (await lockLandscape()) {
+      updateLandscapeLabel();
+      return;
+    }
+    setFakeLandscape(true);
+    toast('已切换为横屏显示，把手机横过来玩吧');
+  }
+
+  function setFakeLandscape(on) {
+    fakeLandscape = !!on;
+    fakeFromPortrait = fakeLandscape && innerHeight >= innerWidth;
+    document.body.classList.toggle('fake-landscape', fakeLandscape);
+    updateLandscapeLabel();
+    applyLayout();
+    resize();
+  }
+
+  function updateLandscapeLabel() {
+    if (!ui.landscape) return;
+    ui.landscape.textContent = (fakeLandscape || isFullscreen()) ? '退出横屏' : '横屏模式';
   }
 
   function toggleFullscreen() {
     const el = document.documentElement;
-    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
-    if (isFs) {
-      const exit = document.exitFullscreen || document.webkitExitFullscreen;
-      if (exit) {
-        try {
-          const p = exit.call(document);
-          if (p && p.catch) p.catch(() => {});
-        } catch (_) { /* ignore */ }
-      }
+    if (isFullscreen()) {
+      unlockOrientation();
+      exitFullscreenIfNeeded();
       return;
     }
     const fn = el.requestFullscreen || el.webkitRequestFullscreen;
@@ -2300,8 +2394,8 @@
   }
 
   function updateFullscreenLabel() {
-    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
-    ui.fullscreen.textContent = isFs ? '退出全屏' : '全屏';
+    ui.fullscreen.textContent = isFullscreen() ? '退出全屏' : '全屏';
+    updateLandscapeLabel();
   }
 
   async function requestWakeLock() {
@@ -2325,6 +2419,7 @@
     input.left = false;
     input.right = false;
     input.jump = false;
+    controlPointers.clear();
     document.querySelectorAll('.ctrl-btn').forEach((b) => b.classList.remove('is-pressed'));
   }
 
@@ -2344,40 +2439,56 @@
       if (document.hidden) resetInput();
     });
 
-    document.querySelectorAll('[data-control]').forEach((btn) => {
+    const pressControl = (btn, pointerId) => {
       const key = btn.dataset.control;
-      const pointers = new Set();
+      controlPointers.set(pointerId, btn);
+      btn.classList.add('is-pressed');
+      if (session.state !== E.GameState.PLAYING) return;
+      if (key === 'action') {
+        session.action();
+        setTimeout(() => {
+          // 动作键是点按不跟手；仍有其他手指按着时保留按下态
+          for (const other of controlPointers.values()) if (other === btn) return;
+          btn.classList.remove('is-pressed');
+        }, 130);
+      } else {
+        input[key] = true;
+      }
+    };
+    const releaseControl = (btn, pointerId) => {
+      if (!controlPointers.has(pointerId)) return;
+      controlPointers.delete(pointerId);
+      // 同一按钮上还有其他手指按着，就不算松开
+      for (const other of controlPointers.values()) if (other === btn) return;
+      btn.classList.remove('is-pressed');
+      const key = btn.dataset.control;
+      if (key !== 'action') input[key] = false;
+    };
 
-      const press = (e) => {
+    document.querySelectorAll('[data-control]').forEach((btn) => {
+      btn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         sfx.init();
         if (e.pointerId != null) {
-          pointers.add(e.pointerId);
           try { btn.setPointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+          pressControl(btn, e.pointerId);
         }
-        btn.classList.add('is-pressed');
-        if (session.state !== E.GameState.PLAYING) return;
-        if (key === 'action') {
-          session.action();
-          setTimeout(() => btn.classList.remove('is-pressed'), 130);
-        } else {
-          input[key] = true;
-        }
-      };
-      const release = (e) => {
-        if (e.pointerId != null) pointers.delete(e.pointerId);
-        if (pointers.size === 0) {
-          btn.classList.remove('is-pressed');
-          if (key !== 'action') input[key] = false;
-        }
-      };
-
-      btn.addEventListener('pointerdown', press);
-      btn.addEventListener('pointerup', release);
-      btn.addEventListener('pointercancel', release);
-      btn.addEventListener('lostpointercapture', release);
+      });
+      btn.addEventListener('pointerup', (e) => releaseControl(btn, e.pointerId));
+      btn.addEventListener('pointercancel', (e) => releaseControl(btn, e.pointerId));
+      btn.addEventListener('lostpointercapture', (e) => releaseControl(btn, e.pointerId));
       btn.addEventListener('contextmenu', (e) => e.preventDefault());
     });
+
+    // 兜底：指针捕获失败（个别浏览器）导致抬起事件没送达按钮时，
+    // 在 window 上统一释放，防止方向状态卡死。
+    const releaseAnywhere = (e) => {
+      if (e.pointerId == null) return;
+      const btn = controlPointers.get(e.pointerId);
+      if (btn) releaseControl(btn, e.pointerId);
+    };
+    window.addEventListener('pointerup', releaseAnywhere);
+    window.addEventListener('pointercancel', releaseAnywhere);
 
     // 任何触屏操作都说明是触屏设备（部分浏览器 pointer 判断不准）
     window.addEventListener('touchstart', () => {
@@ -2486,6 +2597,7 @@
     click(ui.menuShare, () => openShare(best > 0 ? best : 0, best > 0 ? '最高分' : '邀请'));
     click(ui.menuSound, () => toggleMute());
     click(ui.fullscreen, toggleFullscreen);
+    click(ui.landscape, toggleLandscape);
     click(ui.pause, () => {
       if (session.state === E.GameState.PLAYING) {
         session.pause();
